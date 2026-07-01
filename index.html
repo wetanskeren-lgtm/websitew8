@@ -1426,6 +1426,29 @@ function formatTgl(tglStr) {
   catch { return tglStr; }
 }
 
+/**
+ * Ambil nomor HP peserta dari berbagai kemungkinan nama field.
+ * TIDAK ada fallback ke nomor admin — jika tidak ada, return null.
+ */
+function getNoHpPeserta(siswa) {
+  // Cek semua kemungkinan field yang umum dipakai
+  const fieldCandidates = [
+    'phone', 'no_hp', 'nomor_hp', 'no_wa', 'nomor_wa',
+    'nowa', 'hp', 'noTelp', 'no_telp', 'telepon',
+    'no_hp_ortu', 'nomor_hp_ortu', 'no_wa_ortu',
+    'telp_ortu', 'hp_ortu', 'no_hp_wali', 'nomor_hp_wali'
+  ];
+
+  for (const field of fieldCandidates) {
+    const val = siswa[field];
+    if (val && typeof val === 'string' && val.trim() !== '' && val.trim() !== '-') {
+      return val.trim();
+    }
+  }
+
+  return null;
+}
+
 function susunPesanKelas1(s) {
   const sekolah = SD.info.schoolName || 'SDN Majalengka Wetan VIII';
   const tahun = new Date().getFullYear();
@@ -1466,13 +1489,25 @@ _${tgl}_`;
 function bukaPesanModal(key) {
   const siswa = ppdbData[key];
   if (!siswa) return;
-  if (!siswa.phone || siswa.phone.trim() === '') {
-    showToast('Nomor HP tidak tersedia untuk siswa ini.', 'error');
+
+  // Ambil nomor HP PESERTA (bukan admin)
+  const noHp = getNoHpPeserta(siswa);
+
+  if (!noHp) {
+    showToast('Nomor HP peserta tidak tersedia. Pastikan data no. HP terisi di formulir pendaftaran.', 'error');
     return;
   }
-  pesanData = { ...siswa, _key: key };
+
+  // Validasi panjang nomor minimal 10 digit
+  const digitOnly = noHp.replace(/[^0-9]/g, '');
+  if (digitOnly.length < 10) {
+    showToast(`Nomor HP "${noHp}" tidak valid (terlalu pendek).`, 'error');
+    return;
+  }
+
+  pesanData = { ...siswa, _key: key, _noHp: noHp };
   document.getElementById('pmNama').textContent = siswa.nama_siswa;
-  document.getElementById('pmPhone').textContent = siswa.phone;
+  document.getElementById('pmPhone').textContent = noHp;
   document.getElementById('pmPreview').textContent = susunPesanKelas1(siswa);
   document.getElementById('pmKirimText').textContent = 'Kirim via WhatsApp';
   document.getElementById('pmKirimBtn').disabled = false;
@@ -1489,14 +1524,26 @@ function closePesanModal() {
 
 function kirimPesanWA() {
   if (!pesanData) return;
-  let phone = pesanData.phone.replace(/[^0-9]/g, '');
-  if (phone.startsWith('0')) phone = '62' + phone.substring(1);
-  else if (!phone.startsWith('62')) phone = '62' + phone;
+
+  // Gunakan nomor HP PESERTA yang sudah disimpan di _noHp
+  let phone = pesanData._noHp.replace(/[^0-9]/g, '');
+
+  // Konversi ke format internasional
+  if (phone.startsWith('0')) {
+    phone = '62' + phone.substring(1);
+  } else if (!phone.startsWith('62')) {
+    phone = '62' + phone;
+  }
+
   const pesan = susunPesanKelas1(pesanData);
   const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(pesan)}`;
+
+  // Debug log — bisa dihapus setelah dipastikan benar
+  console.log(`[WA KELAS 1] Kirim ke: ${phone} (${pesanData.nama_siswa})`);
+
   window.open(waUrl, '_blank');
   tandaiSudahKirim(pesanData._key);
-  showToast(`Pesan WhatsApp untuk ${pesanData.nama_siswa} telah dibuka.`);
+  showToast(`Pesan WhatsApp untuk ${pesanData.nama_siswa} dibuka ke nomor ${phone}.`);
   setTimeout(() => closePesanModal(), 600);
 }
 
@@ -1624,8 +1671,27 @@ async function deletePortal(k){if(!confirm('Hapus portal ini?'))return;try{delet
 // ===== TICKERS =====
 function renderAllTickers(){renderBeritaTicker();renderLulusTicker();renderPPDBTicker();renderNaikTicker()}
 function renderLulusTicker(){const sec=document.getElementById('lulusTickerSection'),trk=document.getElementById('lulusTickerTrack');const arr=Object.values(lulusData).sort((a,b)=>(b.timestamp||0)-(a.timestamp||0));if(!arr.length){sec.style.display='none';return}sec.style.display='block';const html=arr.map(d=>`<span class="lulus-item"><img src="${esc(d.foto)}" alt="" onerror="this.src='https://picsum.photos/seed/fallback/64/64.jpg'"><span class="lulus-name">${esc(d.nama)}</span><span class="lulus-msg">— ${esc(d.ucapan||'Selamat kelulusan!')}</span><span style="color:rgba(250,204,21,.25);font-size:18px;margin-left:.25rem">✦</span></span>`).join('');trk.innerHTML=html+html;trk.style.animationDuration=Math.min(120,Math.max(60,arr.length*18))+'s'}
-function renderPPDBTicker(){const sec=document.getElementById('ppdbTickerSection'),trk=document.getElementById('ppdbTickerTrack');const arr=Object.values(ppdbData).filter(d=>d.sumber==='PPDB').sort((a,b)=>(b.timestamp||0)-(a.timestamp||0));if(!arr.length){sec.style.display='none';return}sec.style.display='block';const sc={Baru:'bg-indigo-400',Diproses:'bg-amber-400',Diterima:'bg-green-400',Ditolak:'bg-red-400'};const html=arr.map(d=>`<span class="ppdb-item"><span class="dot ${sc[d.status]||'bg-indigo-400'}"></span><span class="ppdb-name">${esc(d.nama_siswa)}</span><span class="ppdb-ortu">— ${esc(d.nama_ortu||'')}</span></span>`).join('');trk.innerHTML=html+html;trk.style.animationDuration=Math.max(15,arr.length*5)+'s'}
-function renderNaikTicker(){const sec=document.getElementById('naikTickerSection'),trk=document.getElementById('naikTickerTrack');const arr=Object.values(ppdbData).filter(d=>d.sumber==='Naik Kelas').sort((a,b)=>(b.timestamp||0)-(a.timestamp||0));if(!arr.length){sec.style.display='none';return}sec.style.display='block';const html=arr.map(d=>`<span class="naik-item"><span class="naik-icon">⬆️</span><span class="naik-name">${esc(d.nama_siswa)}</span><span class="naik-kelas ${KC[d.kelas]||'bg-slate-500/15 text-slate-400'}">Kelas ${esc(d.kelas)}</span></span>`).join('');trk.innerHTML=html+html;trk.style.animationDuration=Math.max(15,arr.length*5)+'s'}
+function renderPPDBTicker(){
+  const sec=document.getElementById('ppdbTickerSection'),trk=document.getElementById('ppdbTickerTrack');
+  const arr=Object.values(ppdbData).filter(d=>d.status==='Diterima').sort((a,b)=>(b.timestamp||0)-(a.timestamp||0));
+  if(!arr.length){sec.style.display='none';return}
+  sec.style.display='block';
+  const sekolah='SDN MAJALENGKA WETAN VIII';
+
+  const html=arr.map(d=>{
+    const kelas=d.kelas||'-';
+    const ortu=d.nama_ortu||'';
+    return`<span class="ppdb-item">
+      <span style="font-size:13px;font-weight:400;color:#4ade80;white-space:nowrap">🎉 ${esc(d.nama_siswa)}</span>
+      <span style="font-size:12px;font-weight:300;color:#cbd5e1;white-space:nowrap">DITERIMA di ${sekolah} sebagai Siswa Kelas ${esc(kelas)}</span>
+      ${ortu?`<span class="ppdb-ortu" style="font-size:10px;color:#475569;white-space:nowrap">— Ortu: ${esc(ortu)}</span>`:''}
+      <span style="color:rgba(74,222,128,.2);font-size:18px;margin-left:.25rem">✦</span>
+    </span>`;
+  }).join('');
+
+  trk.innerHTML=html+html;
+  trk.style.animationDuration=Math.max(25,arr.length*10)+'s';
+}
 
 function applyStatOrText(el,val){if(!el)return;const num=parseInt(val);if(isNaN(num)){el.textContent=val;el.classList.remove('counter');el.removeAttribute('data-target')}else{el.textContent='0';el.dataset.target=num;el.classList.add('counter')}}
 
@@ -1859,72 +1925,90 @@ async function updPPDBStatus(key, status) {
     ppdbData[key].status = status;
     await db.ref('ppdb/' + key).update({ status: status }); 
     const namaSiswa = ppdbData[key].nama_siswa || 'Calon Siswa';
-
-    if (status === 'Diproses') {
-      const kelas = ppdbData[key].kelas;
-      if (kelas) {
-        const snapLulus = await db.ref('lulus').once('value');
-        let updatedLulus = snapLulus.val() || {};
-        updatedLulus[key] = { ...ppdbData[key] };
-        await db.ref('lulus').set(updatedLulus);
-        lulusData[key] = ppdbData[key]; 
-      }
-      
-      const prosesTrack = document.getElementById('ppdbTickerTrack');
-      if(prosesTrack) {
-        const teksBaru = `✅ Data pendaftaran ananda <strong>${namaSiswa}</strong> saat ini sedang <strong>DIPROSES</strong>. &nbsp;&nbsp;•&nbsp;&nbsp;`;
-        if(prosesTrack.innerHTML.includes('DIPROSES')) {
-          prosesTrack.innerHTML += `<span class="ticker-item text-indigo-300">${teksBaru}</span>`;
-        } else {
-          prosesTrack.innerHTML = `<span class="ticker-item text-indigo-300">${teksBaru}</span>`;
-        }
-        document.getElementById('ppdbTickerSection').style.display = 'block';
-      }
-      renderPPDBTable(); 
-    }
+    const noHPOrtu = (ppdbData[key].phone || '').replace(/[^0-9]/g, '');
+    const kelasAkhir = ppdbData[key].kelas || '-';
 
     if (status === 'Diterima') {
-      const kelas = ppdbData[key].kelas;
-      if (kelas) {
-        const snapLulus = await db.ref('lulus').once('value');
-        let updatedLulus = snapLulus.val() || {};
-        updatedLulus[key] = { ...ppdbData[key] };
-        await db.ref('lulus').set(updatedLulus);
-        lulusData[key] = ppdbData[key];
-      }
-
-      const kelasAkhir = ppdbData[key].kelas || '-';
-      const noHPOrtu = ppdbData[key].phone || 'Tidak ada';
-
+      // Ticker
       const terimaTrack = document.getElementById('ppdbTickerTrack');
       if(terimaTrack) {
-        terimaTrack.innerHTML = `<span class="ticker-item text-indigo-300">🎉 Alhamdulillah, selamat kepada ananda <strong>${namaSiswa}</strong> yang telah resmi <strong>DITERIMA</strong> di SDN Majalengka Wetan VIII Tahun Ajaran 2026/2027 Kelas ${kelasAkhir}. Selamat bergabung! &nbsp;&nbsp;•&nbsp;&nbsp;</span>`;
+        terimaTrack.innerHTML = `<span class="ticker-item text-indigo-300">🎉 Selamat ananda <strong>${namaSiswa}</strong> DITERIMA di Kelas ${kelasAkhir}! &nbsp;&nbsp;•&nbsp;&nbsp;</span>`;
         document.getElementById('ppdbTickerSection').style.display = 'block';
       }
 
-      const pesan = `*PESAN UNTUK ORTU AN. ${namaSiswa.toUpperCase()}*\n\nAssalamu'alaikum Wr. Wb.\n\nAlhamdulillahirobbil 'alamin...\nKami ucapkan selamat kepada ananda *${namaSiswa}*, yang telah resmi *DITERIMA* menjadi siswa/siswi baru *SDN Majalengka Wetan VIII* pada tahun ajaran *2026/2027* (Kelas ${kelasAkhir}).\n\nPencapaian ini adalah bukti bahwa ananda adalah anak yang luar biasa dan memiliki semangat belajar yang tinggi. \n\n*"Belajarlah dengan sepenuh hati, karena ilmu adalah cahaya yang akan menerangi masa depanmu. Jadilah siswa yang aktif, berakhlak mulia, dan selalu berkata 'Bisa!' saat menghadapi tantangan. Sekolah bukan hanya soal nilai, tapi bagaimana cara kita menjadi pribadi yang lebih baik setiap harinya."*\n\nUntuk informasi selanjutnya terkait daftar ulang, akan diinformasikan melalui grup atau pemberitahuan berikutnya.\n\nWassalamu'alaikum Wr. Wb.\n— Admin PPDB SDN Majalengka Wetan VIII —\n\n-----------------------------\n*Catatan Sistem:*\nNo. HP Ortu : ${noHPOrtu}`;
+      if (noHPOrtu.length >= 10) {
+        // === KIRIM LANGSUNG KE HP ORTU ===
+        let waNum = noHPOrtu;
+        if (waNum.startsWith('0')) waNum = '62' + waNum.substring(1);
+        else if (!waNum.startsWith('62')) waNum = '62' + waNum;
 
-      const waNumber = '6281316383556'; 
-      const waUrl = `https://api.whatsapp.com/send?phone=${waNumber}&text=${encodeURIComponent(pesan)}`;
-      window.open(waUrl, '_blank');
+        const pesan = `*PENGUMUMAN DITERIMA — SDN MAJALENGKA WETAN VIII*
+
+Assalamu'alaikum Wr. Wb.
+
+Yth. Bapak/Ibu/Wali dari *${namaSiswa}*
+
+Alhamdulillah, kami informasikan bahwa ananda *${namaSiswa}* telah resmi *DITERIMA* sebagai peserta didik baru:
+
+📌 Sekolah : SDN Majalengka Wetan VIII
+📚 Kelas   : ${kelasAkhir}
+📅 Tahun   : ${new Date().getFullYear()}/${new Date().getFullYear()+1}
+
+📋 *Persiapkan dokumen daftar ulang:*
+• Fotokopi Akta Kelahiran
+• Fotokopi Kartu Keluarga
+• Fotokopi KTP Orang Tua
+• Pas Foto 3x4 (4 lembar)
+
+Informasi jadwal daftar ulang akan disampaikan melalui pemberitahuan berikutnya.
+
+Wassalamu'alaikum Wr. Wb.
+— Admin PPDB SDN Majalengka Wetan VIII —`;
+
+        window.open(`https://api.whatsapp.com/send?phone=${waNum}&text=${encodeURIComponent(pesan)}`, '_blank');
+        showToast(`WA dibuka ke HP ortu: ${waNum}`);
+      } else {
+        // Tidak ada HP — kirim ke admin
+        const pesan = `*DITERIMA (TANPA HP ORTU)*\n\nNama: ${namaSiswa}\nKelas: ${kelasAkhir}\nNo. HP ortu: TIDAK TERSEDIA\n\nHarap hubungi manual.`;
+        window.open(`https://api.whatsapp.com/send?phone=6281316383556&text=${encodeURIComponent(pesan)}`, '_blank');
+        showToast('Tidak ada HP ortu — WA dibuka ke nomor Admin');
+      }
     }
 
     updatePPDBStats();
-    if (status !== 'Diproses') {
-      renderPPDBTable();
-    }
-    
-    if (status !== 'Diterima' && status !== 'Diproses') {
-      showToast('Status: ' + status);
-    } else if (status === 'Diterima') {
-      showToast('Diterima! Pesan WA dibuka di nomor Admin');
-    } else if (status === 'Diproses') {
-      showToast('Status: Diproses');
-    }
-
+    renderPPDBTable();
   } catch (e) {
     showToast('Gagal: ' + e.message, 'error');
   }
+}
+
+// ===== KIRIM PESAN MANUAL KE ORTU (dari tombol di tabel) =====
+function kirimManualKeOrtu(key) {
+  const d = ppdbData[key];
+  if (!d) return;
+  const noHP = (d.phone || '').replace(/[^0-9]/g, '');
+  if (noHP.length < 10) {
+    showToast('Nomor HP ortu tidak valid atau tidak tersedia.', 'error');
+    return;
+  }
+  let waNum = noHP;
+  if (waNum.startsWith('0')) waNum = '62' + waNum.substring(1);
+  else if (!waNum.startsWith('62')) waNum = '62' + waNum;
+
+  const pesan = `Yth. Bapak/Ibu/Wali dari *${d.nama_siswa}*
+
+Kami sampaikan informasi dari *SDN Majalengka Wetan VIII*:
+• Nama Siswa : ${d.nama_siswa}
+• Kelas      : ${d.kelas || '-'}
+• Status     : ${d.status || '-'}
+
+Silakan hubungi pihak sekolah jika ada pertanyaan.
+
+Terima kasih.
+— Admin SDN Majalengka Wetan VIII —`;
+
+  window.open(`https://api.whatsapp.com/send?phone=${waNum}&text=${encodeURIComponent(pesan)}`, '_blank');
+  showToast(`WA dibuka ke ${waNum} (ortu ${d.nama_siswa})`);
 }
 
 function editPPDB(key){
